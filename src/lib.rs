@@ -486,10 +486,38 @@ impl SeriousCamera {
             "Unable to set shutter speed."
         )?;
 
-        if shutter != 0 {
+        Ok(())
+    }
+
+    fn set_camera_parameter_transforms(&self, cam: &ffi::MMAL_COMPONENT_T, hflip: bool, vflip: bool, rotate: bool) -> Result<(), CameraError> {
+        let mut param: ffi::MMAL_PARAMETER_MIRROR_T = unsafe { mem::zeroed() };
+        param.hdr.id = ffi::MMAL_PARAMETER_MIRROR as u32;
+        param.hdr.size = mem::size_of::<ffi::MMAL_PARAMETER_MIRROR_T>() as u32;
+
+        param.value = if hflip {
+            if vflip {
+                ffi::MMAL_PARAM_MIRROR_T_MMAL_PARAM_MIRROR_BOTH
+            } else {
+                ffi::MMAL_PARAM_MIRROR_T_MMAL_PARAM_MIRROR_HORIZONTAL
+            }
+        } else {
+            if vflip {
+                ffi::MMAL_PARAM_MIRROR_T_MMAL_PARAM_MIRROR_VERTICAL
+            } else {
+                ffi::MMAL_PARAM_MIRROR_T_MMAL_PARAM_MIRROR_NONE
+            }
+        };
+
+        for i in 0..3 {
+            let out_port = unsafe { *cam.output.offset(i) };
             self.mmal_parameter_status_to_error(
-                unsafe { ffi::mmal_port_parameter_set_rational(port, ffi::MMAL_PARAMETER_FRAME_RATE, self.mmal_f32_to_rational((1000000.0/(shutter as f32)).min(30.0))) },
-                "Unable to set frame rate."
+                unsafe { ffi::mmal_port_parameter_set(out_port, &param.hdr) },
+                "Unable to set flips."
+            )?;
+
+            self.mmal_parameter_status_to_error(
+                unsafe { ffi::mmal_port_parameter_set_int32(out_port, ffi::MMAL_PARAMETER_ROTATION, if rotate { 90 } else { 0 }) },
+                "Unable to set rotation."
             )?;
         }
 
@@ -497,13 +525,15 @@ impl SeriousCamera {
     }
 
     pub fn set_all_camera_parameters(&self, settings: &CameraSettings) -> Result<(), CameraError> {
-        let port = unsafe { self.camera.as_ref().control };
+        let cam = unsafe { self.camera.as_ref() };
+        let port = cam.control;
 
         self.set_camera_parameter_iso(port, settings.iso)?;
         self.set_camera_parameter_brightness_contrast(port, settings.brightness, settings.contrast)?;
         self.set_camera_parameter_wb(port, settings.auto_white_balance, settings.red_balance, settings.blue_balance)?;
         self.set_camera_parameter_exposure(port, settings.auto_exposure, settings.exposure)?;
         self.set_camera_parameter_shutter_speed(port, settings.shutter)?;
+        self.set_camera_parameter_transforms(cam, settings.hflip, settings.vflip, settings.rotate)?;
 
         Ok(())
     }
@@ -1241,6 +1271,7 @@ impl Drop for SeriousCamera {
 pub struct SimpleCamera {
     info: CameraInfo,
     serious: SeriousCamera,
+    active: bool,
     settings: Option<CameraSettings>,
 }
 
@@ -1251,6 +1282,7 @@ impl SimpleCamera {
         Ok(SimpleCamera {
             info,
             serious: sc,
+            active: false,
             settings: None,
         })
     }
@@ -1263,7 +1295,9 @@ impl SimpleCamera {
             settings.height = self.info.max_height;
         }
 
-        self.serious.set_all_camera_parameters(&settings)?;
+        if self.active {
+            self.serious.set_all_camera_parameters(&settings)?;
+        }
         self.settings = Some(settings);
 
         Ok(())
@@ -1294,6 +1328,8 @@ impl SimpleCamera {
         // camera.enable_preview()?;
 
         camera.connect_encoder()?;
+
+        self.active = true;
 
         Ok(())
     }
