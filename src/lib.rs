@@ -1255,7 +1255,7 @@ impl SimpleCamera {
         })
     }
 
-    pub fn configure(&mut self, mut settings: CameraSettings) {
+    pub fn configure(&mut self, mut settings: CameraSettings) -> Result<(), CameraError> {
         if settings.width == 0 {
             settings.width = self.info.max_width;
         }
@@ -1263,12 +1263,15 @@ impl SimpleCamera {
             settings.height = self.info.max_height;
         }
 
+        self.serious.set_all_camera_parameters(&settings)?;
         self.settings = Some(settings);
+
+        Ok(())
     }
 
     pub fn activate(&mut self) -> Result<(), CameraError> {
         if self.settings.is_none() {
-            self.configure(CameraSettings::default());
+            self.configure(CameraSettings::default())?;
         }
         let settings = self.settings.as_ref().unwrap();
         let camera = &mut self.serious;
