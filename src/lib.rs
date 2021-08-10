@@ -44,13 +44,24 @@ const PREVIEW_FRAME_RATE_NUM: i32 = 0;
 const PREVIEW_FRAME_RATE_DEN: i32 = 1;
 
 // TODO: what about the rest of these formats?
-pub use ffi::MMAL_ENCODING_GIF;
-pub use ffi::MMAL_ENCODING_JPEG;
-pub use ffi::MMAL_ENCODING_PNG;
-
-pub use ffi::MMAL_ENCODING_OPAQUE;
-
-pub use ffi::MMAL_ENCODING_RGB24;
+pub use ffi::{
+    MMAL_ENCODING_YUYV,
+    MMAL_ENCODING_YVYU,
+    MMAL_ENCODING_VYUY,
+    MMAL_ENCODING_UYVY,
+    MMAL_ENCODING_RGB24,
+    MMAL_ENCODING_BGR24,
+    MMAL_ENCODING_BGRA,
+    MMAL_ENCODING_NV12,
+    MMAL_ENCODING_YV12,
+    MMAL_ENCODING_NV21,
+    MMAL_ENCODING_GIF,
+    MMAL_ENCODING_JPEG,
+    MMAL_ENCODING_PNG,
+    MMAL_ENCODING_MJPEG,
+    MMAL_ENCODING_H264,
+    MMAL_ENCODING_OPAQUE,
+};
 
 struct Userdata {
     pool: NonNull<ffi::MMAL_POOL_T>,
@@ -620,7 +631,7 @@ impl SeriousCamera {
 
             format = still_port.format;
 
-            // https://github.com/raspberrypi/userland/blob/master/host_applications/linux/apps/raspicam/RaspiStillYUV.c#L799
+            // https://github.com/raspberrypi/userland/blob/3e59217bd93b8024fb8fc1c6530b00cbae64bc73/host_applications/linux/apps/raspicam/RaspiStillYUV.c#L725
 
             if self.use_encoder {
                 (*format).encoding = ffi::MMAL_ENCODING_OPAQUE;
@@ -1311,7 +1322,9 @@ impl SimpleCamera {
         let camera = &mut self.serious;
 
         camera.set_camera_num(0)?;
-        camera.create_encoder()?;
+        if settings.use_encoder {
+            camera.create_encoder()?;
+        }
         camera.set_camera_params(&self.info)?;
 
         camera.create_preview()?;
@@ -1321,13 +1334,17 @@ impl SimpleCamera {
         camera.enable_control_port(false)?;
 
         camera.enable()?;
-        camera.enable_encoder()?; // only needed if processing image eg returning jpeg
+        if settings.use_encoder {
+            camera.enable_encoder()?; // only needed if processing image eg returning jpeg
+        }
         camera.create_pool()?;
 
         camera.connect_preview()?;
         // camera.enable_preview()?;
 
-        camera.connect_encoder()?;
+        if settings.use_encoder {
+            camera.connect_encoder()?;
+        }
 
         self.active = true;
 
