@@ -42,7 +42,20 @@ pub struct CameraSettings {
     pub encoding: c_uint,
     pub width: u32,  // 0 = max
     pub height: u32, // 0 = max
+
     pub iso: ISO,
+    pub brightness: f32,
+    pub contrast: f32,
+    pub auto_white_balance: bool,
+    pub red_balance: f32,
+    pub blue_balance: f32,
+    pub auto_exposure: bool,
+    pub exposure: i32,
+    pub shutter: u32, // 0 = auto
+    pub hflip: bool,
+    pub vflip: bool,
+    pub rotate: bool,
+
     pub zero_copy: bool,
     /// `use_encoder` will go away
     pub use_encoder: bool,
@@ -55,6 +68,17 @@ impl Default for CameraSettings {
             width: 0,
             height: 0,
             iso: ISO_AUTO,
+            brightness: 0.5,
+            contrast: 0.5,
+            auto_white_balance: true,
+            red_balance: 1.5,
+            blue_balance: 1.5,
+            auto_exposure: true,
+            exposure: 17836,
+            shutter: 0,
+            hflip: false,
+            vflip: false,
+            rotate: false,
             zero_copy: false,
             use_encoder: true,
         }

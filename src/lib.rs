@@ -384,6 +384,130 @@ impl SeriousCamera {
         }
     }
 
+    fn mmal_parameter_status_to_error(&self, status: ffi::MMAL_STATUS_T::Type, message: &str) -> Result<(), CameraError> {
+        if status != MMAL_STATUS_T::MMAL_SUCCESS {
+            return Err(MmalError::with_status(message.to_string(), status).into());
+        }
+        Ok(())
+    }
+
+    fn mmal_f32_to_rational(&self, value: f32) -> ffi::MMAL_RATIONAL_T {
+        let denom = 65536.0;
+        ffi::MMAL_RATIONAL_T {
+            num: (value*denom).floor().min(i32::MAX as f32).max(i32::MIN as f32) as i32,
+            den: (denom-1.0).floor() as i32,
+        }
+    }
+
+    fn set_camera_parameter_iso(&self, port: *mut ffi::MMAL_PORT_T, iso: u32) -> Result<(), CameraError> {
+        self.mmal_parameter_status_to_error(
+            unsafe { ffi::mmal_port_parameter_set_uint32(port, ffi::MMAL_PARAMETER_ISO, iso) },
+            "Unable to set ISO."
+        )?;
+
+        Ok(())
+    }
+
+    fn set_camera_parameter_brightness_contrast(&self, port: *mut ffi::MMAL_PORT_T, brightness: f32, contrast: f32) -> Result<(), CameraError> {
+        self.mmal_parameter_status_to_error(
+            unsafe { ffi::mmal_port_parameter_set_rational(port, ffi::MMAL_PARAMETER_BRIGHTNESS, self.mmal_f32_to_rational(brightness)) },
+            "Unable to set brightness."
+        )?;
+        self.mmal_parameter_status_to_error(
+            unsafe { ffi::mmal_port_parameter_set_rational(port, ffi::MMAL_PARAMETER_CONTRAST, self.mmal_f32_to_rational(contrast)) },
+            "Unable to set contrast."
+        )?;
+
+        Ok(())
+    }
+
+    fn set_camera_parameter_wb(&self, port: *mut ffi::MMAL_PORT_T, auto_wb: bool, red: f32, blue: f32) -> Result<(), CameraError> {
+        let mut auto_param: ffi::MMAL_PARAMETER_AWBMODE_T = unsafe { mem::zeroed() };
+        auto_param.hdr.id = ffi::MMAL_PARAMETER_AWB_MODE as u32;
+        auto_param.hdr.size = mem::size_of::<ffi::MMAL_PARAMETER_AWBMODE_T>() as u32;
+
+        auto_param.value = if auto_wb {
+            ffi::MMAL_PARAM_AWBMODE_T_MMAL_PARAM_AWBMODE_AUTO
+        } else {
+            ffi::MMAL_PARAM_AWBMODE_T_MMAL_PARAM_AWBMODE_OFF
+        };
+
+        self.mmal_parameter_status_to_error(
+            unsafe { ffi::mmal_port_parameter_set(port, &auto_param.hdr) },
+            "Unable to set auto awb."
+        )?;
+
+        let mut gain_param: ffi::MMAL_PARAMETER_AWB_GAINS_T = unsafe { mem::zeroed() };
+        gain_param.hdr.id = ffi::MMAL_PARAMETER_CUSTOM_AWB_GAINS as u32;
+        gain_param.hdr.size = mem::size_of::<ffi::MMAL_PARAMETER_AWB_GAINS_T>() as u32;
+
+        let red_ratio = self.mmal_f32_to_rational(red);
+        let blue_ratio = self.mmal_f32_to_rational(blue);
+        gain_param.r_gain.num = red_ratio.num;
+        gain_param.r_gain.den = red_ratio.den;
+        gain_param.b_gain.num = blue_ratio.num;
+        gain_param.b_gain.den = blue_ratio.den;
+
+        self.mmal_parameter_status_to_error(
+            unsafe { ffi::mmal_port_parameter_set(port, &gain_param.hdr) },
+            "Unable to set awb gains."
+        )?;
+
+        Ok(())
+    }
+
+    fn set_camera_parameter_exposure(&self, port: *mut ffi::MMAL_PORT_T, auto_exposure: bool, ev: i32) -> Result<(), CameraError> {
+        let mut auto_param: ffi::MMAL_PARAMETER_EXPOSUREMODE_T = unsafe { mem::zeroed() };
+        auto_param.hdr.id = ffi::MMAL_PARAMETER_EXPOSURE_MODE as u32;
+        auto_param.hdr.size = mem::size_of::<ffi::MMAL_PARAMETER_EXPOSUREMODE_T>() as u32;
+
+        auto_param.value = if auto_exposure {
+            ffi::MMAL_PARAM_EXPOSUREMODE_T_MMAL_PARAM_EXPOSUREMODE_AUTO
+        } else {
+            ffi::MMAL_PARAM_EXPOSUREMODE_T_MMAL_PARAM_EXPOSUREMODE_OFF
+        };
+
+        self.mmal_parameter_status_to_error(
+            unsafe { ffi::mmal_port_parameter_set(port, &auto_param.hdr) },
+            "Unable to set auto exposure."
+        )?;
+
+        self.mmal_parameter_status_to_error(
+            unsafe { ffi::mmal_port_parameter_set_int32(port, ffi::MMAL_PARAMETER_EXPOSURE_COMP, ev) },
+            "Unable to set EV compensation."
+        )?;
+
+        Ok(())
+    }
+
+    fn set_camera_parameter_shutter_speed(&self, port: *mut ffi::MMAL_PORT_T, shutter: u32) -> Result<(), CameraError> {
+        self.mmal_parameter_status_to_error(
+            unsafe { ffi::mmal_port_parameter_set_uint32(port, ffi::MMAL_PARAMETER_SHUTTER_SPEED, shutter) },
+            "Unable to set shutter speed."
+        )?;
+
+        if shutter != 0 {
+            self.mmal_parameter_status_to_error(
+                unsafe { ffi::mmal_port_parameter_set_rational(port, ffi::MMAL_PARAMETER_FRAME_RATE, self.mmal_f32_to_rational((1000000.0/(shutter as f32)).min(30.0))) },
+                "Unable to set frame rate."
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn set_all_camera_parameters(&self, settings: &CameraSettings) -> Result<(), CameraError> {
+        let port = unsafe { self.camera.as_ref().control };
+
+        self.set_camera_parameter_iso(port, settings.iso)?;
+        self.set_camera_parameter_brightness_contrast(port, settings.brightness, settings.contrast)?;
+        self.set_camera_parameter_wb(port, settings.auto_white_balance, settings.red_balance, settings.blue_balance)?;
+        self.set_camera_parameter_exposure(port, settings.auto_exposure, settings.exposure)?;
+        self.set_camera_parameter_shutter_speed(port, settings.shutter)?;
+
+        Ok(())
+    }
+
     pub fn set_camera_format(&mut self, settings: &CameraSettings) -> Result<(), CameraError> {
         unsafe {
             self.use_encoder = settings.use_encoder;
@@ -413,16 +537,7 @@ impl SeriousCamera {
                 };
             }
 
-            let control = self.camera.as_ref().control;
-
-            // TODO:
-            //raspicamcontrol_set_all_parameters(camera, &state->camera_parameters);
-
-            let status =
-                ffi::mmal_port_parameter_set_uint32(control, ffi::MMAL_PARAMETER_ISO, settings.iso);
-            if status != MMAL_STATUS_T::MMAL_SUCCESS {
-                return Err(MmalError::with_status("Unable to set ISO".to_owned(), status).into());
-            }
+            self.set_all_camera_parameters(settings)?;
 
             let mut format = preview_port.format;
 
